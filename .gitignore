@@ -1,0 +1,20 @@
+# Environment secrets
+.env
+.env.*
+
+# Keep example configuration
+!.env.example
+
+# Go binaries
+/bin/
+/dist/
+
+# IDE
+.idea/
+.vscode/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
