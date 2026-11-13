@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"tradex/internal/config"
+	"tradex/internal/middleware"
 	"tradex/internal/modules/auth"
 
 	"tradex/internal/database"
@@ -76,16 +77,28 @@ func run() error {
 
 	// Initialize authentication dependencies.
 	authRepository := auth.NewRepository(db)
-	authService := auth.NewService(authRepository, cfg.JWTSecret)
+	sessionRepository := auth.NewSessionRepository(db)
+
+	authService := auth.NewService(
+		authRepository,
+		sessionRepository,
+		cfg.JWTSecret,
+	)
+
 	authHandler := auth.NewHandler(authService)
 
 	// Register authentication routes.
 	api := router.Group("/api/v1")
-	{
-		api.POST("/auth/register", authHandler.Register)
-		api.POST("/auth/login", authHandler.Login)
-	}
 
+	// Public routes.
+	api.POST("/auth/register", authHandler.Register)
+	api.POST("/auth/login", authHandler.Login)
+	api.POST("/auth/refresh", authHandler.Refresh)
+	// Protected routes.
+	protected := api.Group("/")
+	protected.Use(middleware.AuthMiddleware(cfg.JWTSecret))
+
+	protected.GET("/users/me", authHandler.Me)
 	// 6. Start HTTP server.
 	address := ":" + cfg.Port
 

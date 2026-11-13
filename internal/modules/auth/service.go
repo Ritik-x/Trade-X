@@ -7,19 +7,28 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
-const accessTokenDuration = 15 * time.Minute
+const (
+	accessTokenDuration  = 15 * time.Minute
+	refreshTokenDuration = 7 * 24 * time.Hour
+)
 
 type Service struct {
-	repo      *Repository
+	repo        *Repository
+	sessionRepo *SessionRepository
+
 	jwtSecret string
 }
 
-func NewService(repo *Repository, jwtSecret string) *Service {
+func NewService(repo *Repository, sessionRepo *SessionRepository,
+	jwtSecret string) *Service {
 	return &Service{
-		repo:      repo,
+		repo:        repo,
+		sessionRepo: sessionRepo,
+
 		jwtSecret: jwtSecret,
 	}
 }
@@ -122,11 +131,129 @@ func (s *Service) Login(
 		return nil, fmt.Errorf("sign access token: %w", err)
 	}
 
+	refreshToken, err := GenerateRefreshToken()
+	if err != nil {
+		return nil, fmt.Errorf("generate refresh token: %w", err)
+	}
+	refreshTokenHash := HashRefreshToken(refreshToken)
+
+	// Calculate session expiry.
+	refreshExpiresAt := time.Now().Add(refreshTokenDuration)
+
+	// Store the session in PostgreSQL.
+	session := &Session{
+		UserID:           user.ID,
+		RefreshTokenHash: refreshTokenHash,
+		ExpiresAt:        refreshExpiresAt,
+	}
+
+	if err := s.sessionRepo.Create(ctx, session); err != nil {
+		return nil, fmt.Errorf("create login session: %w", err)
+	}
 	// 6. Return safe user information and token.
+
 	return &LoginResponse{
-		AccessToken: signedToken,
-		TokenType:   "Bearer",
-		ExpiresIn:   int64(accessTokenDuration.Seconds()),
+		AccessToken:           signedToken,
+		RefreshToken:          refreshToken,
+		TokenType:             "Bearer",
+		ExpiresIn:             int64(accessTokenDuration.Seconds()),
+		RefreshTokenExpiresIn: int64(refreshTokenDuration.Seconds()),
+		User: RegisterResponse{
+			ID:        user.ID,
+			FullName:  user.FullName,
+			Email:     user.Email,
+			Status:    user.Status,
+			CreatedAt: user.CreatedAt,
+		},
+	}, nil
+
+}
+
+func (s *Service) GetProfile(
+	ctx context.Context,
+	userID uuid.UUID,
+) (*RegisterResponse, error) {
+
+	user, err := s.repo.GetUserByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get profile: %w", err)
+	}
+
+	if user.Status != "ACTIVE" {
+		return nil, ErrAccountInactive
+	}
+
+	return &RegisterResponse{
+		ID:        user.ID,
+		FullName:  user.FullName,
+		Email:     user.Email,
+		Status:    user.Status,
+		CreatedAt: user.CreatedAt,
+	}, nil
+}
+func (s *Service) Refresh(
+	ctx context.Context,
+	req RefreshRequest,
+) (*LoginResponse, error) {
+	oldToken := strings.TrimSpace(req.RefreshToken)
+	if oldToken == "" {
+		return nil, ErrSessionNotFound
+	}
+
+	oldHash := HashRefreshToken(oldToken)
+
+	oldSession, err := s.sessionRepo.GetActiveByTokenHash(ctx, oldHash)
+	if err != nil {
+		return nil, err
+	}
+
+	user, err := s.repo.GetUserByID(ctx, oldSession.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("get refresh token user: %w", err)
+	}
+
+	if user.Status != "ACTIVE" {
+		return nil, ErrAccountInactive
+	}
+
+	newRefreshToken, err := GenerateRefreshToken()
+	if err != nil {
+		return nil, fmt.Errorf("generate refresh token: %w", err)
+	}
+
+	now := time.Now()
+	accessExpiresAt := now.Add(accessTokenDuration)
+	refreshExpiresAt := now.Add(refreshTokenDuration)
+
+	claims := jwt.RegisteredClaims{
+		Issuer:    "tradex",
+		Subject:   user.ID.String(),
+		IssuedAt:  jwt.NewNumericDate(now),
+		ExpiresAt: jwt.NewNumericDate(accessExpiresAt),
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signedToken, err := token.SignedString([]byte(s.jwtSecret))
+	if err != nil {
+		return nil, fmt.Errorf("sign access token: %w", err)
+	}
+
+	_, err = s.sessionRepo.Rotate(
+		ctx,
+		oldHash,
+		HashRefreshToken(newRefreshToken),
+		refreshExpiresAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return &LoginResponse{
+		AccessToken:           signedToken,
+		RefreshToken:          newRefreshToken,
+		TokenType:             "Bearer",
+		ExpiresIn:             int64(accessTokenDuration.Seconds()),
+		RefreshTokenExpiresIn: int64(refreshTokenDuration.Seconds()),
 		User: RegisterResponse{
 			ID:        user.ID,
 			FullName:  user.FullName,

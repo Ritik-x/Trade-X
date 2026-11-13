@@ -3,6 +3,7 @@ package auth
 import (
 	"errors"
 	"net/http"
+	"tradex/internal/middleware"
 
 	"github.com/gin-gonic/gin"
 )
@@ -88,4 +89,68 @@ func (h *Handler) Login(c *gin.Context) {
 		"message": "login successful",
 		"data":    response,
 	})
+}
+
+func (h *Handler) Me(c *gin.Context) {
+
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "unauthenticated",
+		})
+		return
+	}
+
+	user, err := h.service.GetProfile(
+		c.Request.Context(),
+		userID,
+	)
+
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrUserNotFound):
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "user not found",
+			})
+		case errors.Is(err, ErrAccountInactive):
+			c.JSON(http.StatusForbidden, gin.H{
+				"error": "account is inactive",
+			})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "failed to retrieve profile",
+			})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": user,
+	})
+}
+
+func (h *Handler) Refresh(c *gin.Context) {
+	var req RefreshRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "valid refresh_token is required",
+		})
+		return
+	}
+
+	response, err := h.service.Refresh(c.Request.Context(), req)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrSessionNotFound):
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired refresh token"})
+		case errors.Is(err, ErrAccountInactive):
+			c.JSON(http.StatusForbidden, gin.H{"error": "account is inactive"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not refresh session"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
 }

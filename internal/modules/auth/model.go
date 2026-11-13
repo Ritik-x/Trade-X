@@ -12,6 +12,7 @@ var (
 	ErrEmailAlreadyExists = errors.New("email already registered")
 	ErrInvalidCredentials = errors.New("invalid email or password")
 	ErrAccountInactive    = errors.New("account is inactive")
+	ErrSessionNotFound    = errors.New("session not found")
 )
 
 type User struct {
@@ -43,8 +44,14 @@ type LoginRequest struct {
 }
 
 type LoginResponse struct {
-	AccessToken string           `json:"access_token"`
-	TokenType   string           `json:"token_type"`
-	ExpiresIn   int64            `json:"expires_in"`
-	User        RegisterResponse `json:"user"`
+	AccessToken           string           `json:"access_token"`
+	RefreshToken          string           `json:"refresh_token"`
+	TokenType             string           `json:"token_type"`
+	ExpiresIn             int64            `json:"expires_in"`
+	RefreshTokenExpiresIn int64            `json:"refresh_token_expires_in"`
+	User                  RegisterResponse `json:"user"`
+}
+
+type RefreshRequest struct {
+	RefreshToken string `json:"refresh_token" binding:"required"`
 }
