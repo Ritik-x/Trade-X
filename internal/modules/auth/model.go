@@ -37,3 +37,14 @@ type RegisterResponse struct {
 	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
 }
+type LoginRequest struct {
+	Email    string `json:"email" binding:"required,email,max=255"`
+	Password string `json:"password" binding:"required,min=8,max=72"`
+}
+
+type LoginResponse struct {
+	AccessToken string           `json:"access_token"`
+	TokenType   string           `json:"token_type"`
+	ExpiresIn   int64            `json:"expires_in"`
+	User        RegisterResponse `json:"user"`
+}

@@ -8,11 +8,13 @@ import (
 	"time"
 
 	"tradex/internal/config"
+	"tradex/internal/modules/auth"
 
 	"tradex/internal/database"
 
 	"github.com/gin-gonic/gin"
 )
+
 func main() {
 	if err := run(); err != nil {
 		log.Fatal(err)
@@ -71,6 +73,18 @@ func run() error {
 			"database": "connected",
 		})
 	})
+
+	// Initialize authentication dependencies.
+	authRepository := auth.NewRepository(db)
+	authService := auth.NewService(authRepository, cfg.JWTSecret)
+	authHandler := auth.NewHandler(authService)
+
+	// Register authentication routes.
+	api := router.Group("/api/v1")
+	{
+		api.POST("/auth/register", authHandler.Register)
+		api.POST("/auth/login", authHandler.Login)
+	}
 
 	// 6. Start HTTP server.
 	address := ":" + cfg.Port
