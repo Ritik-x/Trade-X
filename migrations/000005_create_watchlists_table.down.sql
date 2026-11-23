@@ -1,0 +1,3 @@
+
+DROP TABLE IF EXISTS watchlist_items;
+DROP TABLE IF EXISTS watchlists;

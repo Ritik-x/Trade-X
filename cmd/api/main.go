@@ -7,9 +7,12 @@ import (
 	"net/http"
 	"time"
 
+	"tradex/internal/cache"
 	"tradex/internal/config"
 	"tradex/internal/middleware"
 	"tradex/internal/modules/auth"
+	"tradex/internal/modules/market"
+	"tradex/internal/modules/watchlist"
 
 	"tradex/internal/database"
 
@@ -39,8 +42,17 @@ func run() error {
 	}
 	defer db.Close()
 
+	redisClient, err := cache.Connect(ctx, cfg.RedisAddr)
+	if err != nil {
+		return fmt.Errorf("initialize redis: %w", err)
+	}
+	defer redisClient.Close()
+	gin.SetMode(gin.ReleaseMode)
 	// 3. Initialize Gin.
 	router := gin.New()
+	if err := router.SetTrustedProxies(nil); err != nil {
+		return fmt.Errorf("configure trusted proxies: %w", err)
+	}
 
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
@@ -87,6 +99,27 @@ func run() error {
 
 	authHandler := auth.NewHandler(authService)
 
+	//Initialize market dependenices
+	// Initialize market dependencies.
+	marketRepository := market.NewRepository(db)
+	quoteRepository := market.NewQuoteRepository(db)
+
+	// Initialize Redis quote cache.
+	quoteCache := cache.NewQuoteCache(redisClient)
+	nseClient := market.NewNSEClient()
+
+	marketService := market.NewService(
+		marketRepository,
+		quoteRepository,
+		quoteCache,
+		nseClient,
+	)
+
+	marketHandler := market.NewHandler(marketService)
+	// Initialize watchlist dependencies.
+	watchlistRepository := watchlist.NewWatchlistRepository(db)
+	watchlistService := watchlist.NewWatchlistService(watchlistRepository)
+	watchlistHandler := watchlist.NewHandler(watchlistService)
 	// Register authentication routes.
 	api := router.Group("/api/v1")
 
@@ -94,11 +127,28 @@ func run() error {
 	api.POST("/auth/register", authHandler.Register)
 	api.POST("/auth/login", authHandler.Login)
 	api.POST("/auth/refresh", authHandler.Refresh)
+	api.POST("/auth/logout", authHandler.Logout)
+
+	api.GET("/stocks", marketHandler.GetAll)
+	api.GET("/stocks/:exchange/:symbol", marketHandler.GetBySymbol)
+	api.GET("/stocks/:exchange/:symbol/quote", marketHandler.GetQuote)
+	api.POST(
+		"/stocks/:exchange/:symbol/refresh",
+		marketHandler.RefreshQuote,
+	)
+	// Protected routes.
 	// Protected routes.
 	protected := api.Group("/")
 	protected.Use(middleware.AuthMiddleware(cfg.JWTSecret))
 
 	protected.GET("/users/me", authHandler.Me)
+
+	// Watchlist routes.
+	protected.POST("/watchlists", watchlistHandler.Create)
+	protected.GET("/watchlists", watchlistHandler.GetAll)
+	protected.POST("/watchlists/:id/stocks", watchlistHandler.AddStock)
+	protected.DELETE("/watchlists/:id/stocks/:instrument_id", watchlistHandler.RemoveStock)
+	protected.GET("/watchlists/:id/stocks", watchlistHandler.GetStocks)
 	// 6. Start HTTP server.
 	address := ":" + cfg.Port
 

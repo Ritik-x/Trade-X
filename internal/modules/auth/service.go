@@ -263,3 +263,22 @@ func (s *Service) Refresh(
 		},
 	}, nil
 }
+
+func (s *Service) Logout(
+	ctx context.Context,
+	refreshToken string,
+) error {
+	refreshToken = strings.TrimSpace(refreshToken)
+	if refreshToken == "" {
+		return ErrSessionNotFound
+	}
+
+	tokenHash := HashRefreshToken(refreshToken)
+
+	session, err := s.sessionRepo.GetActiveByTokenHash(ctx, tokenHash)
+	if err != nil {
+		return err
+	}
+
+	return s.sessionRepo.Revoke(ctx, session.ID)
+}

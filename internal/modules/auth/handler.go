@@ -154,3 +154,33 @@ func (h *Handler) Refresh(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response)
 }
+
+func (h *Handler) Logout(c *gin.Context) {
+	var req LogoutRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "valid refresh_token is required",
+		})
+		return
+	}
+
+	err := h.service.Logout(c.Request.Context(), req.RefreshToken)
+	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "invalid or expired refresh token",
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "could not logout",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "logged out successfully",
+	})
+}
