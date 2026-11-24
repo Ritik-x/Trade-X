@@ -12,6 +12,7 @@ import (
 	"tradex/internal/middleware"
 	"tradex/internal/modules/auth"
 	"tradex/internal/modules/market"
+	"tradex/internal/modules/order"
 	"tradex/internal/modules/watchlist"
 
 	"tradex/internal/database"
@@ -120,6 +121,17 @@ func run() error {
 	watchlistRepository := watchlist.NewWatchlistRepository(db)
 	watchlistService := watchlist.NewWatchlistService(watchlistRepository)
 	watchlistHandler := watchlist.NewHandler(watchlistService)
+
+	orderRepo := order.NewOrderRepository(db)
+	paperRepo := order.NewPaperRepository(db)
+
+	orderService := order.NewOrderService(
+		orderRepo,
+		paperRepo,
+		marketService,
+	)
+
+	orderHandler := order.NewOrderHandler(orderService)
 	// Register authentication routes.
 	api := router.Group("/api/v1")
 
@@ -145,10 +157,17 @@ func run() error {
 
 	// Watchlist routes.
 	protected.POST("/watchlists", watchlistHandler.Create)
+	protected.POST("/orders", orderHandler.PlaceOrder)
+	protected.POST("/orders/:id/execute", orderHandler.ExecuteOrder)
+	protected.GET("/orders", orderHandler.GetOrderHistory)
+	protected.POST("/orders/:id/cancel", orderHandler.CancelOrder)
 	protected.GET("/watchlists", watchlistHandler.GetAll)
 	protected.POST("/watchlists/:id/stocks", watchlistHandler.AddStock)
 	protected.DELETE("/watchlists/:id/stocks/:instrument_id", watchlistHandler.RemoveStock)
 	protected.GET("/watchlists/:id/stocks", watchlistHandler.GetStocks)
+
+	protected.GET("/paper-trading/account", orderHandler.GetPaperAccount)
+	protected.GET("/paper-trading/portfolio", orderHandler.GetPortfolio)
 	// 6. Start HTTP server.
 	address := ":" + cfg.Port
 

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 	"tradex/internal/cache"
+
+	"github.com/google/uuid"
 )
 
 type Service struct {
@@ -229,6 +231,31 @@ func (s *Service) FetchAndStoreQuote(
 	// Refresh Redis after the database write succeeds.
 	// Redis failure must not invalidate the successful database update.
 	_ = s.quoteCache.SetQuote(ctx, instrument.ID, quote)
+
+	return quote, nil
+}
+
+func (s *Service) GetByInstrumentID(
+	ctx context.Context,
+	instrumentID uuid.UUID,
+) (*Quote, error) {
+	if instrumentID == uuid.Nil {
+		return nil, fmt.Errorf("invalid instrument ID")
+	}
+
+	var cachedQuote Quote
+
+	err := s.quoteCache.GetQuote(ctx, instrumentID, &cachedQuote)
+	if err == nil {
+		return &cachedQuote, nil
+	}
+
+	quote, err := s.quoteRepo.GetByInstrumentID(ctx, instrumentID)
+	if err != nil {
+		return nil, err
+	}
+
+	_ = s.quoteCache.SetQuote(ctx, instrumentID, quote)
 
 	return quote, nil
 }
