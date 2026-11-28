@@ -102,21 +102,36 @@ func (r *PaperRepository) ExecuteOrder(
 	defer tx.Rollback(ctx)
 
 	// Lock the order so it cannot be executed twice concurrently.
-	var status string
+	var (
+    status       string
+    side         string
+    instrumentID uuid.UUID
+    quantity     int64
+)
 
-	err = tx.QueryRow(ctx, `
-		SELECT status
-		FROM orders
-		WHERE id = $1 AND user_id = $2
-		FOR UPDATE
-	`, params.OrderID, params.UserID).Scan(&status)
-	if err != nil {
-		return fmt.Errorf("find order: %w", err)
-	}
+err = tx.QueryRow(ctx, `
+    SELECT status, side, instrument_id, quantity
+    FROM orders
+    WHERE id = $1 AND user_id = $2
+    FOR UPDATE
+`, params.OrderID, params.UserID).Scan(
+    &status,
+    &side,
+    &instrumentID,
+    &quantity,
+)
+if err != nil {
+    return fmt.Errorf("find order: %w", err)
+}
 
-	if status != "PENDING" {
-		return fmt.Errorf("order is not pending")
-	}
+if status != "PENDING" {
+    return fmt.Errorf("order is not pending")
+}
+if side != params.Side ||
+    instrumentID != params.InstrumentID ||
+    quantity != params.Quantity {
+    return fmt.Errorf("execution parameters do not match order")
+}
 
 	// Lock the user's paper account.
 	var accountID uuid.UUID

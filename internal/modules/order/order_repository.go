@@ -70,18 +70,21 @@ func (r *OrderRepository) Create(
 	order *Order,
 ) (*Order, error) {
 	query := `
-		INSERT INTO orders (
-			user_id,
-			instrument_id,
-			side,
-			order_type,
-			quantity,
-			price_at_order,
-			status,
-			idempotency_key
-		)
-		VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', $7)
-		RETURNING ` + orderColumns
+    INSERT INTO orders (
+        user_id,
+        instrument_id,
+        side,
+        order_type,
+        quantity,
+        price_at_order,
+        status,
+        idempotency_key
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', $7)
+    ON CONFLICT (user_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL
+    DO NOTHING
+    RETURNING ` + orderColumns
 
 	createdOrder, err := scanOrder(
 		r.db.QueryRow(

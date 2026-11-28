@@ -116,6 +116,28 @@ func (s *OrderService) PlaceOrder(
 	}
 
 	createdOrder, err := s.repo.Create(ctx, order)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Another concurrent request inserted this idempotency key.
+		existingOrder, getErr := s.repo.GetByIdempotencyKey(
+			ctx,
+			userID,
+			req.IdempotencyKey,
+		)
+		if getErr != nil {
+			return nil, fmt.Errorf("get existing order after conflict: %w", getErr)
+		}
+
+		// Make sure the same key wasn't reused for different order details.
+		if existingOrder.InstrumentID != req.InstrumentID ||
+			existingOrder.Side != req.Side ||
+			existingOrder.Quantity != req.Quantity {
+			return nil, fmt.Errorf("idempotency key reused with different order details")
+		}
+
+		return existingOrder, nil
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("place order: %w", err)
 	}

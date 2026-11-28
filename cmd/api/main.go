@@ -13,6 +13,7 @@ import (
 	"tradex/internal/modules/auth"
 	"tradex/internal/modules/market"
 	"tradex/internal/modules/order"
+	"tradex/internal/modules/portfolio"
 	"tradex/internal/modules/watchlist"
 
 	"tradex/internal/database"
@@ -132,6 +133,17 @@ func run() error {
 	)
 
 	orderHandler := order.NewOrderHandler(orderService)
+
+	// Initialize portfolio dependencies.
+	portfolioRepository := portfolio.NewRepository(db)
+
+	portfolioService := portfolio.NewService(
+		portfolioRepository,
+		marketService,
+	)
+
+	portfolioHandler := portfolio.NewHandler(portfolioService)
+
 	// Register authentication routes.
 	api := router.Group("/api/v1")
 
@@ -168,6 +180,7 @@ func run() error {
 
 	protected.GET("/paper-trading/account", orderHandler.GetPaperAccount)
 	protected.GET("/paper-trading/portfolio", orderHandler.GetPortfolio)
+	protected.GET("/portfolio", portfolioHandler.GetSummary)
 	// 6. Start HTTP server.
 	address := ":" + cfg.Port
 
